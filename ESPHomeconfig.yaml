@@ -1,0 +1,533 @@
+esphome:
+  name: mbrcontrol
+  friendly_name: MBRControl
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+psram:
+# Enable logging
+logger:
+  logs:
+    component: ERROR
+# Enable Home Assistant API
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+
+spi:
+  - id: lcd
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+  - id: touch
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39
+
+globals:
+  - id: glbl_relay_latched
+    type: bool
+    restore_value: yes
+    initial_value: "true"
+
+  # For the auto-off automation
+  - id: glbl_timeout_armed
+    type: bool
+    restore_value: yes
+    initial_value: "true"
+
+  - id: glbl_timeout_length_ticks
+    type: int
+    restore_value: yes
+    # 5 min * 60 seconds = 300
+    initial_value: "300"
+
+  # We ALSO need to keep track of the number of 'ticks'
+  # add _prefix to indicate 'internal'
+  - id: _glbl_timeout_ticks
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+color:
+  - id: red
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: dimred
+    red: 50%
+    green: 0%
+    blue: 0%
+  - id: orange
+    red: 100%
+    green: 50%
+    blue: 0%
+  - id: yellow
+    red: 100%
+    green: 100%
+    blue: 0%
+  - id: green
+    red: 0%
+    green: 100%
+    blue: 0%
+  - id: blue
+    red: 0%
+    green: 0%
+    blue: 100%
+  - id: lightblue
+    red: 0%
+    green: 10%
+    blue: 75%
+  - id: grey
+    red: 70%
+    green: 70%
+    blue: 70%
+  - id: white
+    red: 100%
+    green: 100%
+    blue: 100%
+  - id: black
+    red: 0%
+    green: 0%
+    blue: 0%
+
+font: #preferred font chose
+  - file: "OCRAEXT.TTF"
+    id: OCRAEXT24
+    size: 24
+
+image:
+  - file: mdi:power
+    type: binary
+    id: on_off_button
+    resize: 60x60
+  - file: mdi:lamp
+    type: binary
+    id: lamp
+    resize: 60x60
+  - file: mdi:home-thermometer
+    type: binary
+    id: mdi_outtemp
+    resize: 25x25
+  - file: mdi:alpha-j
+    type: binary
+    transparency: chroma_key
+    id: mdi_j
+    resize: 45x45
+  - file: mdi:alpha-b
+    type: binary
+    transparency: chroma_key 
+    id: mdi_b
+    resize: 45x45
+
+
+binary_sensor:
+  - platform: touchscreen #fullscreen button
+    name: fullscreen
+    internal: True
+    x_min: 1
+    x_max: 319
+    y_min: 1
+    y_max: 239
+    page_id: blank0
+    on_press:
+      then:
+        - light.turn_on:
+            id: back_light
+            transition_length: 100ms
+        - display.page.show: home1
+
+  - platform: touchscreen #screen power button
+    name: screenoff
+    internal: True
+    x_min: 260
+    x_max: 320
+    y_min: 160
+    y_max: 240
+    page_id: home1
+    on_press:
+      then:
+        - light.turn_off: 
+            id: back_light
+            transition_length: 250ms
+        - display.page.show: blank0
+
+  - platform: touchscreen #betty lamp button
+    name: Bettylamptoggle
+    internal: True
+    x_min: 30
+    x_max: 130
+    y_min: 46
+    y_max: 150
+    page_id: home1
+    on_press:
+      then:
+        - logger.log: "Toggle Betty's lamp"
+        - homeassistant.service:
+            service: light.toggle
+            data:
+              entity_id: light.kauf_bulb_mbrb
+
+  - platform: touchscreen #Justin Lamp button
+    name: Justinlamptoggle
+    internal: True
+    x_min: 170
+    x_max: 290
+    y_min: 46
+    y_max: 150
+    page_id: home1
+    on_press:
+      then:
+        - logger.log: "Toggle Justin's lamp"
+        - homeassistant.service:
+            service: light.toggle
+            data:
+              entity_id: light.kauf_bulb_mbrj
+time:
+  - platform: homeassistant
+    id: esptime
+
+text_sensor: #reads the state of the bedside lamps and updates display accordingly
+  - platform: homeassistant
+    id: LampJustin
+    entity_id: light.kauf_bulb_mbrj
+    internal: true
+    on_value:
+      then:
+      - if:
+          condition:
+            text_sensor.state:
+              id: LampJustin
+              state: "on"
+          then:
+            - light.turn_on: back_light
+            - display.page.show: home1
+  - platform: homeassistant
+    id: LampBetty
+    entity_id: light.kauf_bulb_mbrb
+    internal: true
+    on_value:
+      then:
+      - if:
+          condition:
+            text_sensor.state:
+              id: LampBetty
+              state: "on"
+          then:
+            - light.turn_on: back_light
+            - display.page.show: home1
+
+sensor: #converted to F for output
+  - platform: dht
+    pin: GPIO22
+    temperature:
+      name: "Master Bedroom Temperature"
+      id: MBRTemp
+    humidity:
+      name: "Master Bedroom Humidity"
+      id: MBRrH
+    update_interval: 60s
+    model: DHT22
+
+  - platform: adc
+    pin: GPIO34
+    id: LDR
+    internal: true
+    update_interval: 30s
+
+  - platform: homeassistant
+    id: outside_temperature
+    entity_id: sensor.weatheresp_temperature
+    internal: true
+
+display:
+  - platform: ili9xxx
+    model: ILI9341
+    spi_id: lcd
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    invert_colors: false
+    color_palette: 8BIT
+    rotation: 180
+    color_order: rgb
+    dimensions:
+      height: 240
+      width: 320
+    pages:
+      - id: home1
+        lambda: |-
+          double tempconvert = (id(MBRTemp).state * 9 / 5) + 32;
+          // Print time in HH:MM format
+          it.strftime(1, 1, id(OCRAEXT24), id(green), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+          //Betty Lamp Status
+          if (id(LampBetty).state == "on") {
+            it.image(50, 66, id(lamp), id(yellow), id(black));
+          } else if (id(LampBetty).state == "off") {
+            it.image(50, 66, id(lamp), id(grey), id(black));
+          } else if (id(LampBetty).state == "unavailable") {
+            it.image(50, 66, id(lamp), id(dimred), id(black));
+          }
+          it.image(80, 66, id(mdi_b), ImageAlign::TOP_CENTER, id(black));
+          it.print(80, 135, id(OCRAEXT24), id(orange), TextAlign::TOP_CENTER, "Betty");
+
+          //Justin Lamp status
+          if (id(LampJustin).state == "on") {
+            it.image(210, 66, id(lamp), id(yellow), id(black));
+          } else if (id(LampJustin).state == "off") {
+            it.image(210, 66, id(lamp), id(grey), id(black));
+          } else if (id(LampJustin).state == "unavailable") {
+            it.image(210, 66, id(lamp), id(dimred), id(black));
+          }
+          it.image(238, 66, id(mdi_j), ImageAlign::TOP_CENTER, id(black));
+          it.print(240, 135, id(OCRAEXT24), id(orange), TextAlign::TOP_CENTER, "Justin");
+
+          // Print outside temperature (from homeassistant sensor) temp range in C
+          if (id(outside_temperature).has_state()) {
+            if(id(outside_temperature).state < 60){
+              it.printf(295, 1, id(OCRAEXT24), id(blue), TextAlign::TOP_RIGHT , "%.1f°F ", id(outside_temperature).state);
+              it.image(318, 1, id(mdi_outtemp), ImageAlign::TOP_RIGHT, id(blue));
+            } else if(id(outside_temperature).state >= 60 && id(outside_temperature).state < 75){
+              it.printf(295, 1, id(OCRAEXT24), id(green), TextAlign::TOP_RIGHT , "%.1f°F ", id(outside_temperature).state);
+              it.image(318, 1, id(mdi_outtemp), ImageAlign::TOP_RIGHT, id(green));
+            } else if(id(outside_temperature).state >= 75 && id(outside_temperature).state < 85){
+              it.printf(295, 1, id(OCRAEXT24), id(orange), TextAlign::TOP_RIGHT , "%.1f°F ", id(outside_temperature).state);
+              it.image(318, 1, id(mdi_outtemp), ImageAlign::TOP_RIGHT, id(orange));
+            } else {
+              it.printf(295, 1, id(OCRAEXT24), id(red), TextAlign::TOP_RIGHT , "%.1f°F ", id(outside_temperature).state);
+              it.image(318, 1, id(mdi_outtemp), ImageAlign::TOP_RIGHT, id(red));
+            }
+          } else {
+            it.printf(318, 1, id(OCRAEXT24), id(grey), TextAlign::TOP_RIGHT , "Loading...");
+          }
+
+          it.printf(1, 210, id(OCRAEXT24), id(green), TextAlign::BOTTOM_LEFT, "%.1f°F", tempconvert);
+          it.printf(1, 235, id(OCRAEXT24), id(green), TextAlign::BOTTOM_LEFT, "%.1f%%", id(MBRrH).state);
+
+
+          it.image(260,180 , id(on_off_button), id(grey), id(black));
+          it.rectangle(259, 179, 319, 239); 
+      - id: blank0
+        lambda: |-
+          it.image(160,120 , id(on_off_button), ImageAlign::CENTER);
+# Define pins for backlight display and back LED1
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: former_led_pin
+  - platform: ledc
+    id: output_red
+    pin: GPIO4
+    inverted: true
+  - platform: ledc
+    id: output_green
+    pin: GPIO16
+    inverted: true
+  - platform: ledc
+    id: output_blue
+    pin: GPIO17
+    inverted: true
+
+# Define a monochromatic, dimmable light for the backlight
+light:
+  - platform: monochromatic
+    output: former_led_pin
+    name: "Display Backlight"
+    id: back_light
+    restore_mode: ALWAYS_ON
+    on_turn_on:
+      then:
+        - if:
+            condition:
+              # If the countdown timer is enabled
+              lambda: 'return id(glbl_timeout_armed);'
+            then:
+              # The light is already on, start counting the seconds.
+              # When timer ends, light will be turned off
+              - script.execute: _timer_tick
+
+            else:
+              - logger.log:
+                  level: DEBUG
+                  format: "Light1 turned on, countdown timer not armed"
+
+    # This can be called by the natural end of the timer OR manually through any other source.
+    # Regardless of the source, we just need to stop the ticking if it's running.
+    on_turn_off:
+      then:
+        - display.page.show: blank0
+        - if:
+            condition:
+              lambda: 'return id(_timer_tick).is_running();'
+            then:
+              - script.execute: on_timer_stop
+
+            else:
+              - logger.log:
+                  level: DEBUG
+                  format: "Light1 turned off, countdown timer not armed"
+    
+  - platform: rgb
+    name: LED
+    red: output_red
+    id: led
+    green: output_green
+    blue: output_blue
+    restore_mode: ALWAYS_OFF
+
+touchscreen:
+  platform: xpt2046
+  spi_id: touch
+  cs_pin: 33
+  interrupt_pin: 36
+  update_interval: 50ms
+  threshold: 400
+  calibration:
+    x_min: 400
+    x_max: 3800
+    y_min: 230
+    y_max: 3650
+  transform:
+    swap_xy: True
+  on_touch:
+    - lambda: |-
+          ESP_LOGI("cal", "x=%d, y=%d, x_raw=%d, y_raw=%0d",
+              touch.x,
+              touch.y,
+              touch.x_raw,
+              touch.y_raw
+              );
+
+# Exposed switches.
+button:
+  - platform: restart
+    name: ESP32-2432S028 Restart
+
+switch:
+    # UI toggle for the arm/disarm of the auto-off/timeout functionality
+  - name: "Enable Screen Timeout"
+    platform: template
+    id: sw_timeout_arm
+    device_class: "switch"
+    entity_category: "config"
+
+    lambda: |-
+      if (id(glbl_timeout_armed)) {
+        return true;
+      } else {
+        return false;
+      }      
+
+    turn_on_action:
+      then:
+        # Update the global to store the new state
+        # If the light is already on, also start the timer
+        - lambda: |-
+            id(glbl_timeout_armed) = true;
+
+            auto TAG = "template.Timeout Automation.turn_on_action";
+            if ( id(back_light).current_values.is_on() ) {
+              id(_timer_tick).execute();
+            } else {
+              ESP_LOGD(TAG, "Timeout Automation ARMED, light NOT on. Nothing to do!");
+            }            
+
+    turn_off_action:
+      then:
+        # Update the global and stop the ticking timer if needed
+        - lambda: |-
+            // Set the global to OFF, it will be checked next time the _tick fires if the on_timer_stop doesn't
+            // kill the ticking
+            id(glbl_timeout_armed) = false;
+            id(on_timer_stop).execute();   
+
+number:
+  - name: "Screen Timeout"
+    id: timeout_length
+    platform: template
+    entity_category: "config"
+    # TODO: maybe it's a better UX to do this in minutes and do the conversion in esphome
+    unit_of_measurement: seconds
+    mode: box
+    min_value: 30
+    max_value: 21600
+    step: 30
+
+    lambda: |-
+      return (int) id(glbl_timeout_length_ticks);      
+
+    set_action:
+      then:
+        - globals.set:
+            id: glbl_timeout_length_ticks
+            value: !lambda |-
+              // TODO: we're relying on HA to pass an integer; perhaps we should do atoi() and catch any exceptions
+              return (int) x;
+
+script:
+    # End meaning the natural conclusion of the timer. Do whatever we're supposed to do when the timer fires off
+  - id: on_timer_end
+    mode: single
+    then:
+      - light.turn_off: back_light
+      - logger.log: "on_timer_end: output should be off!"
+
+    # Stop meaning the pre-mature ending of the timer
+  - id: on_timer_stop
+    # Do not start a new run. Issue a warning.
+    mode: single
+    then:
+        # For now, just clean up the globals and stop the ticking.
+        # This hook could be used to do so much more, though.
+        ##
+      - lambda: |-
+          auto TAG = "script.on_timer_stop";
+          id(_timer_tick).stop();
+          id(_glbl_timeout_ticks) = 0;
+          ESP_LOGD(TAG, "_timer_tick now stopped and _glbl_timeout_ticks is %d", id(_glbl_timeout_ticks));          
+
+  - id: _timer_tick
+    # Start a new run after previous runs completes. This will happen until timer.stop() is called on us
+    ##
+    mode: queued
+    then:
+      # A single 'tick' is 1 second long
+      - delay: 1s
+      - lambda: |-
+          auto TAG = "lambda._timer_tick";
+
+          // First, update the number of ticks
+          id(_glbl_timeout_ticks) += 1;
+
+          // Then check if we have timed out
+          if (id(_glbl_timeout_ticks) >= id(glbl_timeout_length_ticks) ) {
+
+            // If we have timed out, run the script to handle the timer expiration
+            // It's cleaner to call out to a script rather than put all the "what no?" code in here!
+            id(on_timer_end).execute();
+
+            ESP_LOGD(TAG, "_glbl_timeout_ticks is >= glbl_timeout_length_ticks  %d >= %d ", id(_glbl_timeout_ticks), id(glbl_timeout_length_ticks) );
+
+            // And then re-set the internal counter
+            id(_glbl_timeout_ticks) = 0;
+
+            // And finally, stop the ticking timer
+            id(_timer_tick).stop();
+            ESP_LOGD(TAG, "_timer_tick now stopped!");
+
+          } else {
+            ESP_LOGD(TAG, "_glbl_timeout_ticks is < glbl_timeout_length_ticks  %d < %d ", id(_glbl_timeout_ticks), id(glbl_timeout_length_ticks) );
+            
+            // make sure we run again.. unless we're not supposed to
+            if( id(glbl_timeout_armed) ) {
+              id(_timer_tick).execute();
+            }
+          }  
